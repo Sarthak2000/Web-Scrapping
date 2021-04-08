@@ -1,0 +1,81 @@
+let request = require("request");
+let fs = require("fs");
+let cheerio = require("cheerio");
+const { getPackedSettings } = require("http2");
+let data = {};
+const { jsPDF } = require("jspdf");
+
+let loadedhtml;
+request("https://github.com/topics", function (err, res, body) {
+
+    if (!err) {
+        loadedhtml = cheerio.load(body);
+        let topiclink = loadedhtml(".no-underline.d-flex.flex-column.flex-justify-center");
+        let topicname = loadedhtml(".f3.lh-condensed.text-center.Link--primary.mb-0.mt-1");
+        for (let i = 0; i < topiclink.length; i++) {
+            fs.mkdirSync(loadedhtml(topicname[i]).text().trim());
+            getAllProjects("https://github.com" + loadedhtml(topiclink[i]).attr("href"), loadedhtml(topicname[i]).text().trim());
+        }
+    }
+
+})
+function getAllProjects(url, name) {
+    request(url, function (err, res, body) {
+        if (!err) {
+            let $ = cheerio.load(body);
+            let allProjects = $(".f3.color-text-secondary.text-normal.lh-condensed .text-bold");
+            if (allProjects.length > 8) {
+                allProjects.slice(0, 8);
+            }
+            for (let i = 0; i < allProjects.length; i++) {
+                let Projectname = $(allProjects[i]).text().trim();
+                let Projectlink = "https://github.com" + $(allProjects[i]).attr("href");
+
+                if (!data[name]) {
+                    data[name] = [{ Projectname, Projectlink }];
+                } else {
+                    data[name].push({ Projectname, Projectlink });
+                }
+                getIssues(name, Projectname, Projectlink);
+            }
+        }
+    })
+    function getIssues(name, Projectname, Projectlink) {
+        request(Projectlink + "/issues", function (err, res, body) {
+            if (!err) {
+                let $ = cheerio.load(body);
+                let allIssues = $(".Link--primary.v-align-middle.no-underline.h4.js-navigation-open.markdown-title");
+                for (let i = 0; i < allIssues.length; i++) {
+                    let issuename = $(allIssues[i]).text().trim();
+                    let issuelinks = "https://github.com" + $(allIssues[i]).attr("href");
+
+                    let idx = data[name].findIndex(function (e) {
+                        return e.Projectname == Projectname;
+                    });
+                    if (!data[name][idx].issues) {
+                        data[name][idx].issues = [{ issuename, issuelinks }];
+                    } else {
+                        data[name][idx].issues.push({ issuename, issuelinks });
+                    }
+                    pdfgenerator();
+                }
+            }
+        })
+    }
+}
+function pdfgenerator() {
+    for (x in data) {
+        let topicarr = data[x];
+        for (y in topicarr) {
+            let pName = topicarr[y].Projectname;
+            if (fs.existsSync(`${x}/${pName}.pdf`))
+                fs.unlinkSync(`${x}/${pName}.pdf`);
+            const doc = new jsPDF();
+            for (z in topicarr[y].issues) {
+                doc.text(topicarr[y].issues[z].issuelinks, 10, 10 + 15 * z);
+                doc.text(topicarr[y].issues[z].issuename, 10, 15 + 15 * z);
+            }
+            doc.save(`${x}/${pName}.pdf`);
+        }
+    }
+}
